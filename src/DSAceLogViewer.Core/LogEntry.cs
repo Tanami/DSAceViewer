@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace DSAceLogViewer.Core;
 
-public enum LogCategory { Chat, OOC, Login, Traffic, Combat, System, Other }
+public enum LogCategory { Chat, OOC, Login, Traffic, Combat, System, Other, CONSOLE }
 
 public sealed record LogEntry(long Number, string Timestamp, string Message, string Raw, LogCategory Category)
 {
@@ -14,6 +14,7 @@ public sealed record LogEntry(long Number, string Timestamp, string Message, str
     {
         LogCategory.OOC => "#C5A5FF", LogCategory.Login => "#BCED75",
         LogCategory.Traffic => "#68D4E8", LogCategory.Combat => "#FF9B91",
+        LogCategory.CONSOLE => "#F2B384",
         LogCategory.Chat => "#D4E3F5", LogCategory.System => "#E7C786", _ => "#93A5BE"
     };
 }
@@ -28,6 +29,8 @@ public static partial class LogParser
     private static partial Regex TrafficRegex();
     [GeneratedRegex(@"^(?:\[(?:OOC|Out.of.character)\]|\(OOC\))", RegexOptions.IgnoreCase)]
     private static partial Regex OocRegex();
+    [GeneratedRegex(@"^(?:\[[^\]\r\n]+\]\s*)?CONSOLE\s*:\s*", RegexOptions.IgnoreCase)]
+    private static partial Regex ConsoleRegex();
     [GeneratedRegex(@"^(?:(?:Login|Logout|Logon|Logoff|Connect|Disconnect)(?:\s*[:\[]|\s+event\b)|\[(?:Login|Logout|Connect|Disconnect)\]|(?:Player\s+)?\S+ (?:has |just )?(?:logged (?:in|out)|connected|disconnected|entered the game|left the game)\b|Welcome to the Discovery Freelancer|Initialis?ing\b|Freelancer Started\b|Shutdown\b)", RegexOptions.IgnoreCase)]
     private static partial Regex LoginRegex();
     [GeneratedRegex(@"^(?:Death:|\[(?:Death|Combat|Kill)\])", RegexOptions.IgnoreCase)]
@@ -45,7 +48,8 @@ public static partial class LogParser
         var match = TimestampRegex().Match(raw);
         var timestamp = match.Success ? match.Groups["time"].Value : "";
         var message = match.Success ? raw[match.Length..] : raw;
-        var category = OocRegex().IsMatch(message) ? LogCategory.OOC
+        var category = ConsoleRegex().IsMatch(message) ? LogCategory.CONSOLE
+            : OocRegex().IsMatch(message) ? LogCategory.OOC
             : TrafficRegex().IsMatch(message) ? LogCategory.Traffic
             : CombatRegex().IsMatch(message) ? LogCategory.Combat
             : LoginRegex().IsMatch(message) ? LogCategory.Login

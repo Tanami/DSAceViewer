@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private const int MaximumRetainedEntries = 100_000;
     private readonly List<LogEntry> _all = [];
     private readonly ObservableCollection<LogEntry> _visible = [];
+    private readonly List<LogEntry> _selectedEntries = [];
     private readonly HashSet<LogCategory> _categories = Enum.GetValues<LogCategory>().ToHashSet();
     private readonly Dictionary<LogCategory, ToggleButton> _categoryButtons = [];
     private readonly int[] _categoryCounts = new int[Enum.GetValues<LogCategory>().Length];
@@ -37,6 +38,10 @@ public partial class MainWindow : Window
     private DateTime _noticeUntil;
     private DateTime? _lastReadAt;
     private bool _applyingSettings = true;
+    private bool _restoringSelection;
+    private LogEntry? _selectionAnchor;
+    private double _selectionAnchorTop;
+    private int _resumeVersion;
 
     public MainWindow(string? commandLinePath = null, ViewerSettings? initialSettings = null, string? settingsPath = null)
     {
@@ -96,6 +101,8 @@ public partial class MainWindow : Window
         _filterCancellation?.Cancel();
         _filtering = false;
         _all.Clear(); _visible.Clear(); Array.Clear(_categoryCounts); _totalRead = 0; _pendingCount = 0; _follow = true;
+        _selectedEntries.Clear();
+        _selectionAnchor = null;
         _lastReadAt = null;
         _filter = new LogFilter(SearchBox.Text, InvertToggle.IsChecked == true, _categories);
         var path = _settings.EffectivePath;
@@ -138,6 +145,8 @@ public partial class MainWindow : Window
             _filterCancellation?.Cancel();
             _filtering = false;
             _all.Clear(); _visible.Clear(); Array.Clear(_categoryCounts); _totalRead = 0; _pendingCount = 0;
+            _selectedEntries.Clear();
+            _selectionAnchor = null;
             _filter = new LogFilter(SearchBox.Text, InvertToggle.IsChecked == true, _categories);
             _changingView = true;
             Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => _changingView = false);
@@ -153,11 +162,18 @@ public partial class MainWindow : Window
                 var removeCount = _all.Count - MaximumRetainedEntries;
                 for (var i = 0; i < removeCount; i++) _categoryCounts[(int)_all[i].Category]--;
                 _all.RemoveRange(0, removeCount);
+                _selectedEntries.RemoveAll(entry => entry.Number < _all[0].Number);
+                if (_selectionAnchor is not null && _selectionAnchor.Number < _all[0].Number)
+                    _selectionAnchor = _selectedEntries.FirstOrDefault();
             }
             if (!_filtering)
             {
                 if (trimmed)
+                {
+                    _restoringSelection = true;
                     while (_visible.Count > 0 && _visible[0].Number < _all[0].Number) _visible.RemoveAt(0);
+                    _restoringSelection = false;
+                }
                 var added = 0;
                 foreach (var entry in entries)
                     if (entry.Number >= _all[0].Number && _filter.Matches(entry)) { _visible.Add(entry); added++; }
@@ -185,7 +201,7 @@ public partial class MainWindow : Window
         var snapshot = _all.ToArray();
         var lastNumber = snapshot.LastOrDefault()?.Number ?? 0;
         var generation = _generation;
-        var anchor = GetHistoryAnchor();
+        var resumeVersion = _resumeVersion;
         _filtering = true;
         ExportButton.IsEnabled = false;
         try
@@ -201,20 +217,34 @@ public partial class MainWindow : Window
                 return matches;
             }, cancellation.Token);
             if (cancellation.IsCancellationRequested || generation != _generation) return;
+            var anchor = _selectionAnchor ?? GetHistoryAnchor();
+            var anchorTop = GetEntryTop(anchor) ?? (_selectionAnchor is not null ? _selectionAnchorTop : 0);
+            if (_selectedEntries.Count > 0 && resumeVersion == _resumeVersion) _follow = false;
+            if (_selectionAnchor is not null) _selectionAnchorTop = anchorTop;
+            var selectedNumbers = _selectedEntries.Select(entry => entry.Number).ToHashSet();
+            var horizontalOffset = _scroll?.HorizontalOffset ?? 0;
             _filter = filter;
             _changingView = true;
-            _visible.Clear();
-            var oldest = _all.FirstOrDefault()?.Number ?? long.MaxValue;
-            foreach (var entry in result) if (entry.Number >= oldest) _visible.Add(entry);
-            foreach (var entry in _all) if (entry.Number > lastNumber && filter.Matches(entry)) _visible.Add(entry);
+            _restoringSelection = true;
+            try
+            {
+                _visible.Clear();
+                var oldest = _all.FirstOrDefault()?.Number ?? long.MaxValue;
+                foreach (var entry in result) if (entry.Number >= oldest) _visible.Add(entry);
+                foreach (var entry in _all) if (entry.Number > lastNumber && filter.Matches(entry)) _visible.Add(entry);
+                foreach (var entry in _visible)
+                    if (selectedNumbers.Contains(entry.Number)) LogGrid.SelectedItems.Add(entry);
+            }
+            finally
+            {
+                _restoringSelection = false;
+            }
             _filtering = false;
             _pendingCount = 0;
             if (_follow) ScrollToLatest();
             else if (anchor is not null)
-            {
-                var kept = _visible.FirstOrDefault(entry => entry.Number >= anchor.Number);
-                if (kept is not null) LogGrid.ScrollIntoView(kept);
-            }
+                await RestoreViewAnchorAsync(anchor, anchorTop, horizontalOffset, cancellation.Token);
+            if (cancellation.IsCancellationRequested) return;
             _ = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => _changingView = false);
             RefreshStatus();
         }
@@ -233,6 +263,7 @@ public partial class MainWindow : Window
         EmptyTitle.Text = _all.Count > 0 ? "No matching entries" : "Waiting for your session";
         EmptyDescription.Text = _all.Count > 0 ? "Try a different search, turn off Invert, or select more event categories."
             : !_available ? _watchStatus : "New log entries will appear here automatically.";
+        UpdateJumpButton();
         AllCategories.Content = $"All events  {_all.Count:N0}";
         AllCategories.IsChecked = _categories.Count == _categoryButtons.Count;
         foreach (var (category, button) in _categoryButtons)
@@ -357,7 +388,15 @@ public partial class MainWindow : Window
         catch (System.Runtime.InteropServices.COMException) { Notice("Clipboard is busy. Try copying again."); }
     }
 
-    private void ResumeFollowing() { _follow = true; _pendingCount = 0; ScrollToLatest(); RefreshStatus(); }
+    private void JumpToBottom_Click(object sender, RoutedEventArgs e) => ResumeFollowing();
+    private void ResumeFollowing()
+    {
+        _resumeVersion++;
+        _follow = true;
+        _pendingCount = 0;
+        ScrollToLatest();
+        RefreshStatus();
+    }
     private void ScrollToLatest()
     {
         if (_visible.Count == 0) return;
@@ -425,10 +464,65 @@ public partial class MainWindow : Window
 
     private void LogGrid_ScrollChanged(object sender, ScrollChangedEventArgs e)
     {
+        UpdateJumpButton();
         if (_changingView || _filtering || _scroll is null || e.ExtentHeightChange != 0 || e.ViewportHeightChange != 0 || e.VerticalChange == 0) return;
         _follow = _scroll.VerticalOffset >= _scroll.ScrollableHeight - 0.5;
         if (_follow) _pendingCount = 0;
         RefreshStatus();
+    }
+
+    private void UpdateJumpButton()
+    {
+        var scrolledUp = _scroll is not null && _visible.Count > 0
+            && _scroll.VerticalOffset < _scroll.ScrollableHeight - 0.5;
+        JumpToBottomButton.Visibility = scrolledUp ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void LogGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_restoringSelection) return;
+        _selectedEntries.Clear();
+        _selectedEntries.AddRange(LogGrid.SelectedItems.Cast<LogEntry>());
+        _selectionAnchor = e.AddedItems.OfType<LogEntry>().LastOrDefault()
+            ?? _selectedEntries.LastOrDefault();
+        _selectionAnchorTop = GetEntryTop(_selectionAnchor) ?? 0;
+    }
+
+    private double? GetEntryTop(LogEntry? entry)
+    {
+        if (entry is null || _scroll is null
+            || LogGrid.ItemContainerGenerator.ContainerFromItem(entry) is not DataGridRow row
+            || _scroll.Template.FindName("PART_ScrollContentPresenter", _scroll) is not ScrollContentPresenter viewport
+            || !row.IsDescendantOf(viewport))
+            return null;
+        return row.TranslatePoint(new Point(), viewport).Y;
+    }
+
+    private async Task RestoreViewAnchorAsync(LogEntry anchor, double top, double horizontalOffset, CancellationToken token)
+    {
+        if (_scroll is null || _visible.Count == 0) return;
+        var target = _visible.MinBy(entry => Math.Abs(entry.Number - anchor.Number))!;
+        if (!_settings.WordWrap)
+        {
+            var firstIndex = _visible.IndexOf(target) - Math.Round(top / LogGrid.RowHeight);
+            _scroll.ScrollToVerticalOffset(Math.Max(0, firstIndex));
+            _scroll.ScrollToHorizontalOffset(horizontalOffset);
+            return;
+        }
+
+        LogGrid.ScrollIntoView(target);
+        // Virtualized wrapped rows refine their height estimates as they enter the viewport.
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            await Dispatcher.Yield(DispatcherPriority.ContextIdle);
+            token.ThrowIfCancellationRequested();
+            if (_follow) return;
+            LogGrid.UpdateLayout();
+            var currentTop = GetEntryTop(target);
+            if (currentTop is null || Math.Abs(currentTop.Value - top) < 0.5) break;
+            _scroll.ScrollToVerticalOffset(_scroll.VerticalOffset + currentTop.Value - top);
+        }
+        _scroll.ScrollToHorizontalOffset(horizontalOffset);
     }
 
     private async void Window_Drop(object sender, DragEventArgs e)

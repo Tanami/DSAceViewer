@@ -53,7 +53,12 @@ internal static class Program
             ("Rules Tip: Discovery is a role-playing server.", LogCategory.System),
             ("ERR: Base cannot accept goods, stock limit reached.", LogCategory.System),
             ("Permitted player-owned base good sale due to base admin login.", LogCategory.System),
-            ("[Group] Pilot: hello", LogCategory.Chat), ("An unrecognized server notice", LogCategory.Other)
+            ("[Group] Pilot: hello", LogCategory.Chat), ("An unrecognized server notice", LogCategory.Other),
+            ("CONSOLE: scheduled server notice", LogCategory.CONSOLE),
+            ("console: lowercase sender", LogCategory.CONSOLE),
+            ("[OOC] CONSOLE: channel notice", LogCategory.CONSOLE),
+            ("Pilot: CONSOLE: quoted message", LogCategory.Chat),
+            ("CONSOLE-Pilot: regular player", LogCategory.Chat)
         };
         foreach (var (text, category) in classifications)
             await Test("classification: " + text.Split(':')[0], () => Equal(category, LogParser.Parse(text, 1).Category));
@@ -276,11 +281,13 @@ internal static class Program
             new object[] { new Vector(0, 0), new Vector(0, -10), new Size(50, 800), new Vector(0, 0), new Size(50, 10), new Vector(0, 0) }, null)!;
         Invoke(window, "LogGrid_ScrollChanged", grid, scrollEvent);
         True(((TextBlock)window.FindName("LastReadText")).ToolTip.ToString()!.Contains("Reading history"));
+        Equal(Visibility.Visible, ((Button)window.FindName("JumpToBottomButton")).Visibility);
         var wideEntry = LogParser.Parse("[11.11.2026 13:00:00] [OOC] ZDF-Scout: " + new string('W', 180), 801);
         Invoke(window, "Receive", new TailUpdate([], false, "Watching for new entries", true), new[] { wideEntry });
         Equal(801, grid.Items.Count); True(((TextBlock)window.FindName("LastReadText")).ToolTip.ToString()!.Contains("1 new"));
-        Invoke(window, "ResumeFollowing");
+        ((Button)window.FindName("JumpToBottomButton")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
         await Task.Delay(100); Layout(); True(((TextBlock)window.FindName("LastReadText")).ToolTip.ToString()!.Contains("Following"));
+        Equal(Visibility.Collapsed, ((Button)window.FindName("JumpToBottomButton")).Visibility);
         // A click focuses the cell, which raises this same WPF BringIntoView request.
         Layout(850, 570);
         Invoke(window, "ResumeFollowing");
@@ -381,6 +388,92 @@ internal static class Program
         True(unwrappedRow.ActualHeight < wideLayoutHeight);
         True(scroll.ScrollableWidth > 75);
         True(!ViewerSettings.Load(uiSettingsPath).WordWrap);
+
+        var consoleButton = buttons.Children.OfType<ToggleButton>().Single(button => button.Tag is LogCategory.CONSOLE);
+        var trafficButton = buttons.Children.OfType<ToggleButton>().Single(button => button.Tag is LogCategory.Traffic);
+        var chatButton = buttons.Children.OfType<ToggleButton>().Single(button => button.Tag is LogCategory.Chat);
+        var pinEntries = Enumerable.Range(0, 120).Select(index =>
+        {
+            var message = (index % 4) switch
+            {
+                0 => "CONSOLE: scheduled server notice",
+                1 => "Pilot: rendezvous at the station",
+                2 => "[OOC] Wingmate: ready for the next trip",
+                _ => "Traffic control alert: Pilot has docked"
+            };
+            if (index % 3 == 0) message += " " + string.Join(" ", Enumerable.Repeat("extra context for a wrapped message", 3));
+            return LogParser.Parse($"[11.11.2026 14:00:00] {message} {index + 1}", index + 1);
+        }).ToArray();
+        var pinned = new[] { pinEntries[41], pinEntries[45] };
+
+        foreach (var wrap in new[] { false, true })
+        {
+            await (Task)useSettings.Invoke(window, [displaySettings with
+            {
+                WordWrap = wrap, LogFontSize = 14, ShowLineNumbers = false, ShowEntryType = false
+            }])!;
+            Invoke(window, "Receive", new TailUpdate([], true, "Watching for new entries", true), pinEntries);
+            Layout(850, 570);
+            Invoke(window, "ResumeFollowing");
+            await Task.Delay(100);
+            Layout(850, 570);
+            grid.ScrollIntoView(pinned[1]);
+            await Task.Delay(100);
+            Layout(850, 570);
+            var viewport = (ScrollContentPresenter)scroll.Template.FindName("PART_ScrollContentPresenter", scroll)!;
+            double PinTop()
+            {
+                var pinRow = (DataGridRow?)grid.ItemContainerGenerator.ContainerFromItem(pinned[1])
+                    ?? throw new Exception("The selected anchor row left the viewport");
+                return pinRow.TranslatePoint(new Point(), viewport).Y;
+            }
+            if (wrap) scroll.ScrollToVerticalOffset(scroll.VerticalOffset + PinTop() - 78);
+            else scroll.ScrollToVerticalOffset(42);
+            Layout(850, 570);
+            grid.SelectedItems.Add(pinned[0]);
+            grid.SelectedItems.Add(pinned[1]);
+            var pinnedTop = PinTop();
+            var pinnedHorizontal = scroll.HorizontalOffset;
+
+            async Task ToggleAndCheck(ToggleButton button, int expectedSelection)
+            {
+                button.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                await Task.Delay(500);
+                Layout(850, 570);
+                Equal(expectedSelection, grid.SelectedItems.Count);
+                if (expectedSelection > 0)
+                {
+                    True(pinned.All(entry => grid.SelectedItems.Contains(entry)));
+                    if (Math.Abs(PinTop() - pinnedTop) >= 1.5)
+                        throw new Exception($"Selected row moved with wrap={wrap}, filter={button.Tag}: {pinnedTop} to {PinTop()}, scroll={scroll.VerticalOffset}");
+                    Equal(pinnedHorizontal, scroll.HorizontalOffset);
+                }
+            }
+
+            await ToggleAndCheck(trafficButton, 2);
+            await ToggleAndCheck(trafficButton, 2);
+            await ToggleAndCheck(chatButton, 0);
+            await ToggleAndCheck(chatButton, 2);
+            await ToggleAndCheck(allButton, 0);
+            Equal(0, grid.Items.Count);
+            await ToggleAndCheck(allButton, 2);
+            await ToggleAndCheck(consoleButton, 2);
+            True(grid.Items.Cast<LogEntry>().All(entry => entry.Category != LogCategory.CONSOLE));
+            True(grid.Items.Cast<LogEntry>().Any(entry => entry.Category == LogCategory.Chat));
+            await ToggleAndCheck(consoleButton, 2);
+            Equal(Visibility.Visible, ((Button)window.FindName("JumpToBottomButton")).Visibility);
+            if (outIndex >= 0 && outIndex + 1 < args.Length)
+            {
+                var imageName = wrap ? "viewer-pinned-wrapped.png" : "viewer-pinned.png";
+                Render(root, Path.Combine(Path.GetFullPath(args[outIndex + 1]), imageName), 850, 570);
+            }
+            ((Button)window.FindName("JumpToBottomButton")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            await Task.Delay(100);
+            Layout(850, 570);
+            True(scroll.VerticalOffset >= scroll.ScrollableHeight - 0.5);
+            Equal(Visibility.Collapsed, ((Button)window.FindName("JumpToBottomButton")).Visibility);
+            grid.UnselectAll();
+        }
         window.Close();
     }
 

@@ -74,7 +74,7 @@
                   FontFamily="Arial Unicode MS, Arial" FontSize="14" RowHeight="30" ColumnHeaderHeight="34"
                   EnableRowVirtualization="True" EnableColumnVirtualization="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                   VirtualizingPanel.ScrollUnit="Item" ScrollViewer.CanContentScroll="True" ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                  Loaded="LogGrid_Loaded" SizeChanged="LogGrid_SizeChanged" ScrollViewer.ScrollChanged="LogGrid_ScrollChanged" PreviewMouseWheel="LogGrid_PreviewMouseWheel">
+                  Loaded="LogGrid_Loaded" SizeChanged="LogGrid_SizeChanged" SelectionChanged="LogGrid_SelectionChanged" ScrollViewer.ScrollChanged="LogGrid_ScrollChanged" PreviewMouseWheel="LogGrid_PreviewMouseWheel">
           <DataGrid.Resources>
             <Style x:Key="LogMessageText" TargetType="TextBlock" BasedOn="{x:Static DataGridTextColumn.DefaultElementStyle}">
               <Setter Property="TextWrapping" Value="NoWrap" />
@@ -124,6 +124,9 @@
           <TextBlock x:Name="EmptyTitle" Text="Waiting for your session" FontSize="22" Foreground="#C7C7C7" HorizontalAlignment="Center" />
           <TextBlock x:Name="EmptyDescription" Text="New log entries will appear here automatically." Foreground="{StaticResource Muted}" Margin="0,10,0,0" TextWrapping="Wrap" MaxWidth="430" TextAlignment="Center" />
         </StackPanel>
+        <Button x:Name="JumpToBottomButton" Content="Jump to Bottom" Click="JumpToBottom_Click" Visibility="Collapsed"
+                HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,22,20" Padding="12,8" FontSize="12"
+                Background="#303030" BorderBrush="#777777" Panel.ZIndex="1" />
       </Grid>
     </Border>
 
