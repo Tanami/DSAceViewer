@@ -1,0 +1,85 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Check release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          [xml]$project = Get-Content -LiteralPath src/DSAceLogViewer/DSAceLogViewer.csproj -Raw
+          $expectedTag = 'v' + $project.Project.PropertyGroup.Version
+          if ($env:RELEASE_TAG -ne $expectedTag) {
+            throw "Tag $env:RELEASE_TAG does not match project version $expectedTag."
+          }
+
+      - name: Run regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/DSAceLogViewer.Tests -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build standalone executable
+        shell: pwsh
+        run: ./build.ps1 -Runtime win-x64
+
+      - name: Prepare release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release | Out-Null
+          Copy-Item -LiteralPath dist/DSAceLogViewer.exe -Destination release/DSAceViewer-win-x64.exe
+          $digest = (Get-FileHash -LiteralPath release/DSAceViewer-win-x64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$digest  DSAceViewer-win-x64.exe" | Set-Content -LiteralPath release/SHA256SUMS.txt -Encoding ascii
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: DSAceViewer-win-x64
+          path: release/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v8
+        with:
+          name: DSAceViewer-win-x64
+          path: release
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "DSAceViewer ${RELEASE_TAG#v}" \
+            --notes "Standalone Windows x64 executable with the .NET runtime included. Download DSAceViewer-win-x64.exe and run it. SHA256SUMS.txt contains its SHA-256 checksum." \
+            --verify-tag

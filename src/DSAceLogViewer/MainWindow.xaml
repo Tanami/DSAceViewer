@@ -1,0 +1,132 @@
+<Window x:Class="DSAceLogViewer.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DSAce Log Viewer" Width="1280" Height="820" MinWidth="850" MinHeight="570" WindowStartupLocation="CenterScreen"
+        Background="#191919" Foreground="#E8E8E8" FontFamily="Segoe UI" FontSize="13"
+        UseLayoutRounding="True" AllowDrop="True" Drop="Window_Drop" PreviewKeyDown="Window_PreviewKeyDown">
+  <Window.Resources>
+    <Style x:Key="CategoryFilterButton" TargetType="ToggleButton" BasedOn="{StaticResource {x:Type ToggleButton}}">
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToggleButton">
+            <Border x:Name="Surface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
+              <Grid>
+                <Border x:Name="Tint" Background="{TemplateBinding Foreground}" Opacity="0" IsHitTestVisible="False" />
+                <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Grid>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Surface" Property="BorderBrush" Value="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}" />
+                <Setter TargetName="Tint" Property="Opacity" Value="0.16" />
+              </Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Surface" Property="Background" Value="#414141" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+  <Grid Margin="26,22,26,18">
+    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+    <Grid Margin="0,0,0,17">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+      <StackPanel>
+        <TextBlock Text="DSAce Log Viewer" FontSize="20" FontWeight="SemiBold" />
+        <TextBlock Text="made by MERZBAU aka ZDF-Atazir" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,5,0,0" />
+      </StackPanel>
+      <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,15,0">
+          <TextBlock Text="Aa" Foreground="{StaticResource Muted}" FontSize="12" VerticalAlignment="Center" />
+          <Slider x:Name="FontSizeSlider" Minimum="10" Maximum="24" Value="14" Width="85" Margin="8,0,6,0" TickFrequency="1" IsSnapToTickEnabled="True" AutoToolTipPlacement="TopLeft" VerticalAlignment="Center" ValueChanged="FontSize_Changed" AutomationProperties.Name="Log font size" />
+          <TextBlock x:Name="FontSizeText" Text="14" FontSize="11" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Width="17" />
+        </StackPanel>
+        <Button x:Name="ExportButton" Content="Export" Click="Export_Click" Margin="0,0,8,0" Background="#434343" BorderBrush="#B7B7B7" ToolTip="Save all currently matching entries as a text log or CSV. Ctrl+E" />
+        <Button Content="Settings" Click="Settings_Click" ToolTip="Choose a log file or change display settings" />
+      </StackPanel>
+    </Grid>
+
+    <StackPanel Grid.Row="2" Margin="0,14,0,7">
+      <Grid Margin="0,0,0,8">
+        <TextBlock Text="SHOW EVENTS" Foreground="{StaticResource Muted}" FontSize="10" FontWeight="SemiBold" />
+        <TextBlock Text="Unselect categories to hide them" Foreground="{StaticResource Muted}" FontSize="11" HorizontalAlignment="Right" />
+      </Grid>
+      <WrapPanel x:Name="CategoryPanel">
+        <ToggleButton x:Name="AllCategories" Content="All events" Tag="All" IsChecked="True" Click="Category_Click" />
+      </WrapPanel>
+    </StackPanel>
+
+    <Grid Grid.Row="3" Margin="0,0,0,10">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+      <Grid>
+        <TextBox x:Name="SearchBox" TextChanged="Search_Changed" MaxLength="256" VerticalContentAlignment="Center" Padding="13,10,32,10" AutomationProperties.Name="Fuzzy search" ToolTip="Case-insensitive fuzzy search. Words can appear in any order. Small typos and omitted letters are accepted. Ctrl+F" />
+        <TextBlock x:Name="SearchPlaceholder" Text="Fuzzy search messages, players, or timestamps…" Foreground="#919191" Margin="14,0,34,0" VerticalAlignment="Center" IsHitTestVisible="False" />
+      </Grid>
+      <ToggleButton Grid.Column="1" x:Name="InvertToggle" Content="Invert results" Click="Invert_Click" Margin="9,0,8,0" ToolTip="Hide search matches within the selected categories. Has no effect when search is empty." />
+      <Button Grid.Column="2" Content="Clear" Click="Clear_Click" Padding="13,8" ToolTip="Clear the search and reset Invert results" />
+    </Grid>
+
+    <Border Grid.Row="1" BorderBrush="{StaticResource Frame}" BorderThickness="1" Background="#1E1E1E">
+      <Grid>
+        <DataGrid x:Name="LogGrid" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="False" CanUserReorderColumns="False"
+                  HeadersVisibility="Column" GridLinesVisibility="None" RowHeaderWidth="0" BorderThickness="0" Background="#1E1E1E" Foreground="#E1E1E1"
+                  AlternatingRowBackground="#232323" RowBackground="#1E1E1E" SelectionMode="Extended" SelectionUnit="FullRow"
+                  FontFamily="Arial Unicode MS, Arial" FontSize="14" RowHeight="30" ColumnHeaderHeight="34"
+                  EnableRowVirtualization="True" EnableColumnVirtualization="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                  VirtualizingPanel.ScrollUnit="Item" ScrollViewer.CanContentScroll="True" ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                  Loaded="LogGrid_Loaded" SizeChanged="LogGrid_SizeChanged" ScrollViewer.ScrollChanged="LogGrid_ScrollChanged" PreviewMouseWheel="LogGrid_PreviewMouseWheel">
+          <DataGrid.Resources>
+            <Style x:Key="LogMessageText" TargetType="TextBlock" BasedOn="{x:Static DataGridTextColumn.DefaultElementStyle}">
+              <Setter Property="TextWrapping" Value="NoWrap" />
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding DataContext.WordWrap, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                  <Setter Property="TextWrapping" Value="Wrap" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+            <Style TargetType="DataGridColumnHeader"><Setter Property="Background" Value="#303030" /><Setter Property="Foreground" Value="#B2B2B2" /><Setter Property="FontFamily" Value="Segoe UI" /><Setter Property="FontSize" Value="10" /><Setter Property="FontWeight" Value="SemiBold" /><Setter Property="Padding" Value="12,8" /><Setter Property="BorderThickness" Value="0,0,0,1" /><Setter Property="BorderBrush" Value="#575757" /></Style>
+            <Style TargetType="DataGridCell">
+              <EventSetter Event="RequestBringIntoView" Handler="LogCell_RequestBringIntoView" />
+              <Setter Property="BorderThickness" Value="0" />
+              <Setter Property="Padding" Value="10,5" />
+              <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+              <Setter Property="VerticalContentAlignment" Value="Center" />
+              <Setter Property="Template">
+                <Setter.Value>
+                  <ControlTemplate TargetType="DataGridCell">
+                    <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                      <ContentPresenter VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    </Border>
+                  </ControlTemplate>
+                </Setter.Value>
+              </Setter>
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding DataContext.WordWrap, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                  <Setter Property="VerticalContentAlignment" Value="Top" />
+                </DataTrigger>
+                <Trigger Property="IsSelected" Value="True">
+                  <Setter Property="Background" Value="#4A4A4A" />
+                  <Setter Property="Foreground" Value="#F6F6F6" />
+                </Trigger>
+              </Style.Triggers>
+            </Style>
+            <Style TargetType="DataGridRow"><Setter Property="Foreground" Value="{Binding Color}" /><Setter Property="ToolTip" Value="{Binding Raw}" /></Style>
+          </DataGrid.Resources>
+          <DataGrid.Columns>
+            <DataGridTextColumn x:Name="LineNumberColumn" Header="#" Binding="{Binding Number}" Width="68" Foreground="#848484" Visibility="Collapsed" />
+            <DataGridTextColumn x:Name="TimestampColumn" Header="LOG TIMESTAMP" Binding="{Binding Timestamp}" Width="175" Foreground="#A4A4A4" />
+            <DataGridTextColumn x:Name="EntryTypeColumn" Header="EVENT" Binding="{Binding CategoryName}" Width="85" Visibility="Collapsed" />
+            <DataGridTextColumn x:Name="MessageColumn" Header="MESSAGE" Binding="{Binding Message}" Width="SizeToCells" MinWidth="390" ElementStyle="{StaticResource LogMessageText}" />
+          </DataGrid.Columns>
+          <DataGrid.ContextMenu><ContextMenu><MenuItem Header="Copy selected original lines" Click="Copy_Click" InputGestureText="Ctrl+C" /></ContextMenu></DataGrid.ContextMenu>
+        </DataGrid>
+        <StackPanel x:Name="EmptyPanel" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False" Margin="30">
+          <TextBlock x:Name="EmptyTitle" Text="Waiting for your session" FontSize="22" Foreground="#C7C7C7" HorizontalAlignment="Center" />
+          <TextBlock x:Name="EmptyDescription" Text="New log entries will appear here automatically." Foreground="{StaticResource Muted}" Margin="0,10,0,0" TextWrapping="Wrap" MaxWidth="430" TextAlignment="Center" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <TextBlock Grid.Row="4" x:Name="LastReadText" Text="last read —" Foreground="{StaticResource Muted}" FontSize="10" HorizontalAlignment="Right" Margin="0,1,0,0" />
+  </Grid>
+</Window>
