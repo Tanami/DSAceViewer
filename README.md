@@ -1,5 +1,7 @@
 # DSAceViewer
 
+![DSAceViewer screenshot](screenshot.png)
+
 A standalone Windows viewer for Discovery Freelancer's `DSAce.log`, with live
 following, event filters, fuzzy search, word wrap and export.
 
