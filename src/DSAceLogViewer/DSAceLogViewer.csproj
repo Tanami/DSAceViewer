@@ -8,7 +8,7 @@
     <AssemblyName>DSAceLogViewer</AssemblyName>
     <Product>DSAce Log Viewer</Product>
     <Description>Live Discovery Freelancer log viewer</Description>
-    <Version>1.0.10</Version>
+    <Version>1.0.11</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <DebugType>embedded</DebugType>
   </PropertyGroup>

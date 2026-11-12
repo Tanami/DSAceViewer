@@ -37,6 +37,9 @@ public static partial class LogParser
     private static partial Regex CombatRegex();
     [GeneratedRegex(@"^(?:(?:Rules Tip|Tip|ERR|ERROR|WARNING|INFO|Auto-Buy\([^)]*\))\s*:|OK\s|Options:|\s*-(?:log|localtime|showinfocards)|Screen size|Invalid display|Rearmament available|Jump systems|Cloaking device|Docking at|A bounty of|Welcome administrator|Permitted player-owned|To (?:type|see|learn)|Discovery is a|Players are required|Please (?:visit|check)|The year is|The solar winds|Unsure about)", RegexOptions.IgnoreCase)]
     private static partial Regex SystemRegex();
+    // Command latency replies are not player chat, despite their name-colon format.
+    [GeneratedRegex(@"^Ping:\s*\d+(?:\.\d+)?\s*ms\b", RegexOptions.IgnoreCase)]
+    private static partial Regex PingResponseRegex();
     [GeneratedRegex(@"^(?:\[[^\]\r\n]+\]\s*)?[^:\r\n]{1,80}:\s")]
     private static partial Regex ChatRegex();
 
@@ -54,6 +57,7 @@ public static partial class LogParser
             : CombatRegex().IsMatch(message) ? LogCategory.Combat
             : LoginRegex().IsMatch(message) ? LogCategory.Login
             : SystemRegex().IsMatch(message) ? LogCategory.System
+            : PingResponseRegex().IsMatch(message) ? LogCategory.Other
             : ChatRegex().IsMatch(message) ? LogCategory.Chat : LogCategory.Other;
         return new(number, timestamp, message, raw, category);
     }
